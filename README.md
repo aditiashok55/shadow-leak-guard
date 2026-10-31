@@ -9,8 +9,8 @@ then add layered enforcement and measure how much each layer reduces leakage.
 
 ## Status
 
-- [x] **M1 — Synthetic corpus + baseline leak demo** (current)
-- [ ] M2 — Layer 1: ACL pre-filter
+- [x] **M1 — Synthetic corpus + baseline leak demo**
+- [x] **M2 — Layer 1: ACL pre-filter** (current)
 - [ ] M3 — Layer 2: graph lineage check
 - [ ] M4 — Layer 3: output guard
 - [ ] M5 — Red-team eval + ablation table
@@ -87,6 +87,31 @@ python src/pipeline.py --role intern --acl-filter --query "What's the plan for n
 
 Every run writes a step-by-step trace to `traces/<run_id>.json`.
 
+## Layer 1 — ACL pre-filter (M2)
+
+A deterministic, **default-deny** control that runs after retrieval and before
+generation (`src/guard.py:layer1_acl_filter`). For each retrieved chunk it checks
+the role's clearance against the doc's sensitivity; anything not explicitly
+allowed is dropped with a machine-readable reason
+(`insufficient_clearance`, `missing_acl_default_deny`, `unknown_role_default_deny`).
+
+```bash
+# intern, Layer 1 ON -> restricted CEO memo is dropped, answer is benign
+python src/pipeline.py --role intern --acl-filter --query "What's the plan for next quarter's team changes?"
+
+# exec, Layer 1 ON -> full clearance, legitimately sees restricted content (no false block)
+python src/pipeline.py --role exec --acl-filter --query "What's the plan for next quarter's team changes?"
+```
+
+Each run emits a `layer1_acl` trace span:
+
+```json
+{"step": "layer1_acl", "role": "intern", "input_chunks": 5, "kept": 2,
+ "dropped": [{"doc_id": "exec_ceo_memo_restricted", "sensitivity": "restricted",
+              "reason": "insufficient_clearance"}],
+ "latency_ms": 0.61}
+```
+
 ## Layout
 
 ```
@@ -100,7 +125,8 @@ shadow-leak-guard/
 │   ├── acl.py        # roles + ACL authorization (default deny)
 │   ├── llm.py        # Ollama embeddings + chat (temperature 0)
 │   ├── ingest.py     # chunk → embed → store with ACL metadata
-│   ├── retrieve.py   # vector search (+ optional ACL filter)
+│   ├── retrieve.py   # pure top-k vector search (permission-agnostic)
+│   ├── guard.py      # Layer 1 ACL pre-filter (Layers 2/3 land in M3/M4)
 │   ├── pipeline.py   # ties layers together via flags
 │   └── trace.py      # JSON span logging
 ├── demo_leak.sh
