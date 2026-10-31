@@ -1,0 +1,17 @@
+{
+  "hr_handbook": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] },
+  "hr_benefits": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] },
+  "hr_pto_policy": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] },
+  "hr_salary_bands": { "sensitivity": "restricted", "allowed_roles": ["exec"] },
+  "finance_q3_summary": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] },
+  "finance_budget_internal": { "sensitivity": "internal", "allowed_roles": ["employee", "manager", "exec"] },
+  "finance_forecast_confidential": { "sensitivity": "confidential", "allowed_roles": ["manager", "exec"] },
+  "legal_terms_public": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] },
+  "legal_vendor_contract": { "sensitivity": "internal", "allowed_roles": ["employee", "manager", "exec"] },
+  "legal_ma_draft_restricted": { "sensitivity": "restricted", "allowed_roles": ["exec"] },
+  "exec_allhands_notes": { "sensitivity": "internal", "allowed_roles": ["employee", "manager", "exec"] },
+  "exec_ceo_memo_restricted": { "sensitivity": "restricted", "allowed_roles": ["exec"] },
+  "exec_strategy_public": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] },
+  "eng_roadmap_internal": { "sensitivity": "internal", "allowed_roles": ["employee", "manager", "exec"] },
+  "it_security_public": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] }
+}

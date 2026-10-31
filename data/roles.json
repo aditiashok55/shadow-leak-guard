@@ -1,0 +1,21 @@
+{
+  "roles": {
+    "intern": {
+      "clearance": ["public"],
+      "description": "Temporary staff. Lowest clearance."
+    },
+    "employee": {
+      "clearance": ["public", "internal"],
+      "description": "Full-time individual contributor."
+    },
+    "manager": {
+      "clearance": ["public", "internal", "confidential"],
+      "description": "People manager with budget visibility."
+    },
+    "exec": {
+      "clearance": ["public", "internal", "confidential", "restricted"],
+      "description": "Executive leadership. Full access."
+    }
+  },
+  "sensitivity_order": ["public", "internal", "confidential", "restricted"]
+}

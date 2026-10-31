@@ -1,0 +1,5 @@
+.chroma/
+traces/*.json
+__pycache__/
+*.pyc
+.venv/
