@@ -8,10 +8,13 @@ Design rule: deterministic controls first, LLM checks second.
 """
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 
 from acl import clearance_for, doc_sensitivity, is_allowed
 from graph import Bridge, get_store
+from llm import generate
 from retrieve import Chunk
 
 
@@ -114,3 +117,77 @@ def layer2_graph_check(chunks: list[Chunk], role: str) -> Layer2Result:
             kept.append(c)
 
     return Layer2Result(kept=kept, redacted=redacted)
+
+
+# ----------------------------------------------------------------------------
+# Layer 3 (M4): LLM output guard  — SECOND-LINE detector, never the primary control
+# ----------------------------------------------------------------------------
+
+# Known secrets the model should never reveal to an under-cleared role. Derived
+# from the restricted/confidential corpus; kept explicit so the detector prompt
+# is grounded rather than relying on the model's judgement alone.
+_SENSITIVE_HINTS = {
+    "restricted": ["Project Atlas", "Northwind Analytics", "acquisition", "layoffs",
+                   "eliminate", "redundant roles", "30 roles"],
+    "confidential": ["severance", "retention bonuses", "salary bands", "merit pool",
+                     "compensation bands"],
+}
+
+_GUARD_SYSTEM = (
+    "You are a security output guard for an internal assistant. You are given a "
+    "user's role, the sensitivity levels that role is cleared to see, and a draft "
+    "answer. Decide whether the draft reveals any entity or fact the role should "
+    "NOT see. Respond with STRICT JSON only: {\"leak\": true|false, \"reason\": "
+    "\"short explanation\"}. No markdown, no extra text."
+)
+
+
+@dataclass
+class Layer3Result:
+    leak: bool
+    reason: str
+    raw: str
+
+
+def _extract_json(text: str) -> dict:
+    """Best-effort JSON extraction from an LLM response."""
+    text = text.strip()
+    # Strip ```json fences if present.
+    text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except json.JSONDecodeError:
+                pass
+    return {}
+
+
+def layer3_output_guard(answer: str, role: str) -> Layer3Result:
+    """LLM check on the final answer. Returns {leak, reason}.
+
+    Treated as a *second-line* detector: deterministic Layers 1-2 are the real
+    controls. This catches residual leaks they miss, but is never trusted alone.
+    """
+    cleared = clearance_for(role)
+    # Collect forbidden hints = sensitivity levels the role is NOT cleared for.
+    forbidden_hints: list[str] = []
+    for level, hints in _SENSITIVE_HINTS.items():
+        if level not in cleared:
+            forbidden_hints.extend(hints)
+
+    prompt = (
+        f"Role: {role}\n"
+        f"Cleared sensitivities: {cleared}\n"
+        f"Examples of facts/entities this role must NOT see: {forbidden_hints}\n\n"
+        f"Draft answer:\n\"\"\"\n{answer}\n\"\"\"\n\n"
+        "Return STRICT JSON {\"leak\": bool, \"reason\": str}."
+    )
+    raw = generate(_GUARD_SYSTEM, prompt)
+    parsed = _extract_json(raw)
+    leak = bool(parsed.get("leak", False))
+    reason = str(parsed.get("reason", "unparseable guard response"))
+    return Layer3Result(leak=leak, reason=reason, raw=raw)

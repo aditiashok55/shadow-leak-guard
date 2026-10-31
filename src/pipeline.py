@@ -16,7 +16,14 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 
-from guard import Dropped, Redacted, layer1_acl_filter, layer2_graph_check
+from guard import (
+    Dropped,
+    Layer3Result,
+    Redacted,
+    layer1_acl_filter,
+    layer2_graph_check,
+    layer3_output_guard,
+)
 from retrieve import Chunk, retrieve
 from llm import generate
 from trace import Trace
@@ -35,6 +42,7 @@ class PipelineResult:
     dropped: list[Dropped] = field(default_factory=list)
     redacted: list[Redacted] = field(default_factory=list)
     blocked: bool = False
+    guard: Layer3Result | None = None
     trace: Trace = None  # type: ignore[assignment]
 
 
@@ -94,22 +102,39 @@ def run(
     else:
         trace.span("layer2_graph", enabled=False, note="graph lineage check off")
 
-    # Layer 3 is implemented in M4.
-
     if not chunks:
         trace.span("generate", skipped=True, reason="no_chunks_allowed")
         trace.span("final", blocked=True, answer_preview="")
         trace.save()
         return PipelineResult("I don't have information to answer that.",
-                              chunks, dropped, redacted, True, trace)
+                              chunks, dropped, redacted, blocked=True, trace=trace)
 
     with trace.timed("generate") as t:
         answer = generate(SYSTEM_PROMPT, build_prompt(query, chunks))
         t.set(context_docs=sorted({c.doc_id for c in chunks}))
 
+    # --- Layer 3: LLM output guard (second-line detector) ---
+    guard_result = None
+    if output_guard:
+        with trace.timed("layer3_output") as t:
+            guard_result = layer3_output_guard(answer, role)
+            t.set(role=role, leak=guard_result.leak, reason=guard_result.reason)
+        if guard_result.leak:
+            trace.span("final", blocked=True, blocked_by="layer3_output",
+                       reason=guard_result.reason, answer_preview="")
+            trace.save()
+            return PipelineResult(
+                "[BLOCKED by output guard: this answer may reveal information "
+                "your role is not cleared to see.]",
+                chunks, dropped, redacted, blocked=True,
+                guard=guard_result, trace=trace)
+    else:
+        trace.span("layer3_output", enabled=False, note="output guard off")
+
     trace.span("final", blocked=False, answer_preview=answer[:200])
     trace.save()
-    return PipelineResult(answer, chunks, dropped, redacted, False, trace)
+    return PipelineResult(answer, chunks, dropped, redacted, blocked=False,
+                          guard=guard_result, trace=trace)
 
 
 def main() -> None:
@@ -118,16 +143,19 @@ def main() -> None:
     ap.add_argument("--query", default="What's the plan for next quarter's team changes?")
     ap.add_argument("--acl-filter", action="store_true", help="enable Layer 1 (M2)")
     ap.add_argument("--graph-check", action="store_true", help="enable Layer 2 (M3)")
+    ap.add_argument("--output-guard", action="store_true", help="enable Layer 3 (M4)")
     args = ap.parse_args()
 
     result = run(args.query, args.role,
-                 acl_filter=args.acl_filter, graph_check=args.graph_check)
+                 acl_filter=args.acl_filter, graph_check=args.graph_check,
+                 output_guard=args.output_guard)
 
     print("=" * 70)
     print(f"ROLE : {args.role}")
     print(f"QUERY: {args.query}")
     print(f"LAYER 1 (ACL)  : {'ON' if args.acl_filter else 'OFF (baseline)'}")
     print(f"LAYER 2 (GRAPH): {'ON' if args.graph_check else 'OFF'}")
+    print(f"LAYER 3 (GUARD): {'ON' if args.output_guard else 'OFF'}")
     print("=" * 70)
     print("\nKEPT (doc_id : sensitivity):")
     for c in result.kept_chunks:
@@ -140,10 +168,13 @@ def main() -> None:
         print("\nREDACTED by Layer 2 (doc_id : sensitivity : inference bridges):")
         for r in result.redacted:
             print(f"  - {r.doc_id:32s} [{r.sensitivity}]  {r.summary}")
+    if result.guard is not None:
+        verdict = "LEAK" if result.guard.leak else "clean"
+        print(f"\nLAYER 3 verdict: {verdict} — {result.guard.reason}")
     print("\nANSWER:\n")
     print(result.answer)
     if result.blocked:
-        print("\n[BLOCKED: no authorized context for this role]")
+        print("\n[BLOCKED for this role]")
     print("\n" + "=" * 70)
     print(f"Trace saved: traces/{result.trace.run_id}.json")
 

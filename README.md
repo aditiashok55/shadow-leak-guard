@@ -11,8 +11,8 @@ then add layered enforcement and measure how much each layer reduces leakage.
 
 - [x] **M1 — Synthetic corpus + baseline leak demo**
 - [x] **M2 — Layer 1: ACL pre-filter**
-- [x] **M3 — Layer 2: graph lineage check** (current)
-- [ ] M4 — Layer 3: output guard
+- [x] **M3 — Layer 2: graph lineage check**
+- [x] **M4 — Layer 3: output guard** (current)
 - [ ] M5 — Red-team eval + ablation table
 
 ## Architecture
@@ -156,6 +156,33 @@ python src/pipeline.py --role exec --acl-filter --graph-check \
  "latency_ms": 0.4}
 ```
 
+## Layer 3 — output guard (M4)
+
+An **LLM** check on the final answer (`src/guard.py:layer3_output_guard`). It is a
+deliberate **second-line detector**: the deterministic Layers 1–2 are the real
+controls; this catches residual leaks they miss but is never trusted as the primary
+gate. It receives the role, its cleared sensitivities, and known forbidden hints,
+then returns strict JSON `{"leak": bool, "reason": str}`. On `leak: true` the
+pipeline blocks and replaces the answer.
+
+```bash
+# Layer 3 ONLY, deterministic layers OFF -> it still catches the baseline leak
+python src/pipeline.py --role intern --output-guard \
+  --query "What's the plan for next quarter's team changes?"
+
+# Full stack: L1 + L2 produce a safe answer, L3 confirms it is clean (no false block)
+python src/pipeline.py --role intern --acl-filter --graph-check --output-guard \
+  --query "What's the plan for next quarter's team changes?"
+```
+
+`layer3_output` trace span:
+
+```json
+{"step": "layer3_output", "role": "intern", "leak": true,
+ "reason": "Draft reveals Project Atlas and the acquisition the intern must not see.",
+ "latency_ms": 820.5}
+```
+
 ## Layout
 
 ```
@@ -172,7 +199,7 @@ shadow-leak-guard/
 │   ├── ingest.py     # chunk → embed → store with ACL metadata
 │   ├── retrieve.py   # pure top-k vector search (permission-agnostic)
 │   ├── graph.py      # GraphStore interface + NetworkX lineage graph (Layer 2)
-│   ├── guard.py      # Layer 1 ACL pre-filter + Layer 2 graph check (Layer 3 in M4)
+│   ├── guard.py      # Layer 1 ACL + Layer 2 graph check + Layer 3 output guard
 │   ├── pipeline.py   # ties layers together via flags
 │   └── trace.py      # JSON span logging
 ├── demo_leak.sh
