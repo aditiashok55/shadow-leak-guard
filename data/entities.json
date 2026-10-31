@@ -15,7 +15,8 @@
     "exec_ceo_memo_restricted": ["Project Atlas", "Northwind Analytics", "acquisition", "restructuring", "layoffs", "severance", "retention bonuses", "platform team", "team changes"],
     "exec_strategy_public": ["growth strategy", "quarterly planning"],
     "eng_roadmap_internal": ["platform consolidation", "platform team", "team changes", "reorganization"],
-    "it_security_public": ["security", "multi-factor authentication"]
+    "it_security_public": ["security", "multi-factor authentication"],
+    "vendor_faq_public": ["vendor onboarding", "invoice", "payment terms"]
   },
   "entity_sensitivity": {
     "Project Atlas": "restricted",

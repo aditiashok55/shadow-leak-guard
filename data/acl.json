@@ -13,5 +13,6 @@
   "exec_ceo_memo_restricted": { "sensitivity": "restricted", "allowed_roles": ["exec"] },
   "exec_strategy_public": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] },
   "eng_roadmap_internal": { "sensitivity": "internal", "allowed_roles": ["employee", "manager", "exec"] },
-  "it_security_public": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] }
+  "it_security_public": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] },
+  "vendor_faq_public": { "sensitivity": "public", "allowed_roles": ["intern", "employee", "manager", "exec"] }
 }

@@ -1,6 +1,7 @@
 .chroma/
 traces/*.json
 data/.entity_cache.json
+evals/last_run.log
 __pycache__/
 *.pyc
 .venv/

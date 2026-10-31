@@ -12,8 +12,39 @@ then add layered enforcement and measure how much each layer reduces leakage.
 - [x] **M1 — Synthetic corpus + baseline leak demo**
 - [x] **M2 — Layer 1: ACL pre-filter**
 - [x] **M3 — Layer 2: graph lineage check**
-- [x] **M4 — Layer 3: output guard** (current)
-- [ ] M5 — Red-team eval + ablation table
+- [x] **M4 — Layer 3: output guard**
+- [x] **M5 — Red-team eval + ablation table** (current)
+
+## Results — red-team ablation
+
+27 adversarial queries across 6 categories (direct, paraphrase, multi-hop
+inference, role-escalation, prompt-injection, benign/authorized) run under four
+configurations. A **leak** = a forbidden fact appears in a substantive answer (a
+refusal that merely names the topic it declines does not count). A **false-block**
+= an answerable case that was wrongly refused.
+
+| Config | Leak rate | False-block rate | Avg latency |
+|---|---|---|---|
+| Baseline | 37.0% | 0.0% | 2272 ms |
+| + Layer 1 | 3.7% | 12.5% | 1680 ms |
+| + Layer 1+2 | 0.0% | 18.8% | 1500 ms |
+| + Layer 1+2+3 | 0.0% | 18.8% | 3376 ms |
+
+Reproduce: `python evals/run_eval.py` (writes `evals/results.json`).
+
+**Reading the table**
+- **Layer 1 (ACL pre-filter)** does the heavy lifting: 37% → 3.7% leak for a
+  deterministic, sub-millisecond control.
+- **Layer 2 (graph lineage)** closes the residual inference leak to **0%** by
+  catching cross-document entity bridges (e.g. a confidential forecast naming
+  `Project Atlas`).
+- **Layer 3 (output guard)** holds leak at 0% as a second-line detector; it adds
+  latency (an extra LLM call) without false-blocking beyond Layer 2.
+- **False-blocks are the honest tradeoff.** Of the 3: two are the small local
+  model conservatively answering "I don't know" from valid public context (model
+  caution, not the guard), and one is Layer 2 legitimately redacting a
+  `Project Atlas`-bridged forecast — the expected precision cost of inference
+  defense.
 
 ## Architecture
 
@@ -188,7 +219,7 @@ python src/pipeline.py --role intern --acl-filter --graph-check --output-guard \
 ```
 shadow-leak-guard/
 ├── data/
-│   ├── docs/     # 15 synthetic markdown documents
+│   ├── docs/     # 16 synthetic markdown documents (incl. a prompt-injection doc)
 │   ├── roles.json
 │   ├── acl.json
 │   └── entities.json  # hand-labeled entities + entity sensitivity (Layer 2)
@@ -202,6 +233,10 @@ shadow-leak-guard/
 │   ├── guard.py      # Layer 1 ACL + Layer 2 graph check + Layer 3 output guard
 │   ├── pipeline.py   # ties layers together via flags
 │   └── trace.py      # JSON span logging
+├── evals/
+│   ├── queries.json  # 27 adversarial red-team cases
+│   ├── run_eval.py   # runs all 4 configs, prints the ablation table
+│   └── results.json  # latest eval output
 ├── demo_leak.sh
 └── requirements.txt
 ```
