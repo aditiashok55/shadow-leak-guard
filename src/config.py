@@ -20,3 +20,8 @@ CHUNK_SIZE = 600          # characters per chunk (simple char-based chunking)
 CHUNK_OVERLAP = 100
 TEMPERATURE = 0.0         # deterministic
 COLLECTION_NAME = "shadow_leak_docs"
+
+# Layer 2 (graph lineage) knobs
+ENTITIES_PATH = DATA_DIR / "entities.json"
+ENTITY_CACHE_PATH = DATA_DIR / ".entity_cache.json"
+GRAPH_HOP_LIMIT = 2       # doc -> entity -> restricted-doc = 2 hops (one shared entity)

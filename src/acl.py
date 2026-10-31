@@ -37,6 +37,15 @@ def doc_allowed_roles(doc_id: str) -> list[str]:
     return load_acl().get(doc_id, {}).get("allowed_roles", [])
 
 
+def sensitivity_covered(role: str, sensitivity: str) -> bool:
+    """True if the role's clearance covers a given sensitivity level."""
+    return sensitivity in clearance_for(role)
+
+
+def all_doc_ids() -> list[str]:
+    return list(load_acl().keys())
+
+
 def is_allowed(role: str, doc_id: str) -> bool:
     """Default-deny authorization check used by Layer 1 (M2)."""
     acl = load_acl()

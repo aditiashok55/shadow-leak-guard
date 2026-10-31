@@ -1,7 +1,7 @@
 """Guard layers for shadow-leak-guard.
 
 Layer 1 (M2): deterministic ACL pre-filter. Default deny. No LLM involved.
-Layer 2 (M3): graph lineage check.      (not yet implemented)
+Layer 2 (M3): graph lineage check (rule-based, NetworkX). No LLM involved.
 Layer 3 (M4): LLM output guard.         (not yet implemented)
 
 Design rule: deterministic controls first, LLM checks second.
@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from acl import clearance_for, doc_sensitivity, is_allowed
+from graph import Bridge, get_store
 from retrieve import Chunk
 
 
@@ -66,3 +67,50 @@ def layer1_acl_filter(chunks: list[Chunk], role: str) -> Layer1Result:
             dropped.append(Dropped(c.doc_id, c.id, sens, reason))
 
     return Layer1Result(kept=kept, dropped=dropped)
+
+
+# ----------------------------------------------------------------------------
+# Layer 2 (M3): graph lineage check
+# ----------------------------------------------------------------------------
+@dataclass
+class Redacted:
+    """A chunk removed by Layer 2 because its lineage bridges to forbidden docs."""
+
+    doc_id: str
+    chunk_id: str
+    sensitivity: str
+    bridges: list[Bridge]
+
+    @property
+    def summary(self) -> str:
+        parts = {f"{b.entity}->{b.target_doc}({b.target_sensitivity})" for b in self.bridges}
+        return ", ".join(sorted(parts))
+
+
+@dataclass
+class Layer2Result:
+    kept: list[Chunk]
+    redacted: list[Redacted]
+
+
+def layer2_graph_check(chunks: list[Chunk], role: str) -> Layer2Result:
+    """Rule-based inference-leak check.
+
+    A chunk may have passed Layer 1 (the role can see its document), yet that
+    document can share a sensitive entity with a document the role CANNOT see.
+    That shared entity is an inference bridge: answering from this chunk risks
+    revealing restricted facts. We redact (drop) such chunks and record the path.
+    """
+    store = get_store()
+    allowed = clearance_for(role)
+    kept: list[Chunk] = []
+    redacted: list[Redacted] = []
+
+    for c in chunks:
+        bridges = store.bridges_to_forbidden(c.doc_id, allowed)
+        if bridges:
+            redacted.append(Redacted(c.doc_id, c.id, c.sensitivity, bridges))
+        else:
+            kept.append(c)
+
+    return Layer2Result(kept=kept, redacted=redacted)

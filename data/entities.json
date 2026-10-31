@@ -1,0 +1,31 @@
+{
+  "_comment": "Hand-labeled entities for the synthetic corpus (plan M3). `documents` maps each doc to its entities. `entity_sensitivity` labels the DISTINCTIVE entities that are genuinely sensitive (codenames, named deals, comp specifics). Generic overlap vocabulary (team changes, restructuring, reorganization) is intentionally NOT sensitive: it is the shared wording that makes semantic search leak, but it is not itself a secret. Any entity absent from `entity_sensitivity` defaults to 'public'. The sensitive bridges (Project Atlas, Northwind Analytics, layoffs, acquisition) span restricted + lower docs to create the inference leak.",
+  "documents": {
+    "hr_handbook": ["team changes", "reorganization", "restructuring", "quarterly planning"],
+    "hr_benefits": ["benefits", "health insurance", "401k"],
+    "hr_pto_policy": ["paid time off", "quarterly planning"],
+    "hr_salary_bands": ["salary bands", "compensation", "merit pool", "retention bonuses", "severance", "restructuring", "reorganization", "team changes"],
+    "finance_q3_summary": ["revenue", "team changes"],
+    "finance_budget_internal": ["budget", "headcount", "platform team", "reorganization", "team changes"],
+    "finance_forecast_confidential": ["forecast", "restructuring", "severance", "Project Atlas", "reorganization", "team changes"],
+    "legal_terms_public": ["terms of service", "liability"],
+    "legal_vendor_contract": ["vendor contract", "liability"],
+    "legal_ma_draft_restricted": ["Project Atlas", "Northwind Analytics", "acquisition", "restructuring", "severance", "team changes"],
+    "exec_allhands_notes": ["team changes", "reorganization", "quarterly planning"],
+    "exec_ceo_memo_restricted": ["Project Atlas", "Northwind Analytics", "acquisition", "restructuring", "layoffs", "severance", "retention bonuses", "platform team", "team changes"],
+    "exec_strategy_public": ["growth strategy", "quarterly planning"],
+    "eng_roadmap_internal": ["platform consolidation", "platform team", "team changes", "reorganization"],
+    "it_security_public": ["security", "multi-factor authentication"]
+  },
+  "entity_sensitivity": {
+    "Project Atlas": "restricted",
+    "Northwind Analytics": "restricted",
+    "acquisition": "restricted",
+    "layoffs": "restricted",
+    "severance": "confidential",
+    "retention bonuses": "confidential",
+    "merit pool": "confidential",
+    "salary bands": "confidential",
+    "compensation": "confidential"
+  }
+}

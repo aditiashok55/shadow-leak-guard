@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 
-from guard import Dropped, layer1_acl_filter
+from guard import Dropped, Redacted, layer1_acl_filter, layer2_graph_check
 from retrieve import Chunk, retrieve
 from llm import generate
 from trace import Trace
@@ -33,6 +33,7 @@ class PipelineResult:
     answer: str
     kept_chunks: list[Chunk]
     dropped: list[Dropped] = field(default_factory=list)
+    redacted: list[Redacted] = field(default_factory=list)
     blocked: bool = False
     trace: Trace = None  # type: ignore[assignment]
 
@@ -75,14 +76,32 @@ def run(
     else:
         trace.span("layer1_acl", enabled=False, note="baseline — no ACL enforcement")
 
-    # Layer 2 and Layer 3 are implemented in M3/M4.
+    # --- Layer 2: graph lineage check (rule-based inference-leak catcher) ---
+    redacted: list[Redacted] = []
+    if graph_check:
+        with trace.timed("layer2_graph") as t:
+            result2 = layer2_graph_check(chunks, role)
+            before = len(chunks)
+            chunks = result2.kept
+            redacted = result2.redacted
+            t.set(role=role, input_chunks=before, kept=len(result2.kept),
+                  redacted=[{"doc_id": r.doc_id, "sensitivity": r.sensitivity,
+                             "bridges": [{"entity": b.entity,
+                                          "target_doc": b.target_doc,
+                                          "target_sensitivity": b.target_sensitivity,
+                                          "hops": b.hops} for b in r.bridges]}
+                            for r in result2.redacted])
+    else:
+        trace.span("layer2_graph", enabled=False, note="graph lineage check off")
+
+    # Layer 3 is implemented in M4.
 
     if not chunks:
         trace.span("generate", skipped=True, reason="no_chunks_allowed")
         trace.span("final", blocked=True, answer_preview="")
         trace.save()
         return PipelineResult("I don't have information to answer that.",
-                              chunks, dropped, True, trace)
+                              chunks, dropped, redacted, True, trace)
 
     with trace.timed("generate") as t:
         answer = generate(SYSTEM_PROMPT, build_prompt(query, chunks))
@@ -90,7 +109,7 @@ def run(
 
     trace.span("final", blocked=False, answer_preview=answer[:200])
     trace.save()
-    return PipelineResult(answer, chunks, dropped, False, trace)
+    return PipelineResult(answer, chunks, dropped, redacted, False, trace)
 
 
 def main() -> None:
@@ -98,14 +117,17 @@ def main() -> None:
     ap.add_argument("--role", default="intern")
     ap.add_argument("--query", default="What's the plan for next quarter's team changes?")
     ap.add_argument("--acl-filter", action="store_true", help="enable Layer 1 (M2)")
+    ap.add_argument("--graph-check", action="store_true", help="enable Layer 2 (M3)")
     args = ap.parse_args()
 
-    result = run(args.query, args.role, acl_filter=args.acl_filter)
+    result = run(args.query, args.role,
+                 acl_filter=args.acl_filter, graph_check=args.graph_check)
 
     print("=" * 70)
     print(f"ROLE : {args.role}")
     print(f"QUERY: {args.query}")
-    print(f"LAYER 1 (ACL): {'ON' if args.acl_filter else 'OFF (baseline)'}")
+    print(f"LAYER 1 (ACL)  : {'ON' if args.acl_filter else 'OFF (baseline)'}")
+    print(f"LAYER 2 (GRAPH): {'ON' if args.graph_check else 'OFF'}")
     print("=" * 70)
     print("\nKEPT (doc_id : sensitivity):")
     for c in result.kept_chunks:
@@ -114,6 +136,10 @@ def main() -> None:
         print("\nDROPPED by Layer 1 (doc_id : sensitivity : reason):")
         for d in result.dropped:
             print(f"  - {d.doc_id:32s} [{d.sensitivity}]  {d.reason}")
+    if result.redacted:
+        print("\nREDACTED by Layer 2 (doc_id : sensitivity : inference bridges):")
+        for r in result.redacted:
+            print(f"  - {r.doc_id:32s} [{r.sensitivity}]  {r.summary}")
     print("\nANSWER:\n")
     print(result.answer)
     if result.blocked:

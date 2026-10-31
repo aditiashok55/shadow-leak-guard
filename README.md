@@ -10,8 +10,8 @@ then add layered enforcement and measure how much each layer reduces leakage.
 ## Status
 
 - [x] **M1 — Synthetic corpus + baseline leak demo**
-- [x] **M2 — Layer 1: ACL pre-filter** (current)
-- [ ] M3 — Layer 2: graph lineage check
+- [x] **M2 — Layer 1: ACL pre-filter**
+- [x] **M3 — Layer 2: graph lineage check** (current)
 - [ ] M4 — Layer 3: output guard
 - [ ] M5 — Red-team eval + ablation table
 
@@ -112,6 +112,50 @@ Each run emits a `layer1_acl` trace span:
  "latency_ms": 0.61}
 ```
 
+## Layer 2 — graph lineage check (M3)
+
+Layer 1 stops documents the role cannot open. But a document a role *can* open may
+share a secret with one it cannot — revealing restricted facts by **inference**.
+Layer 2 (`src/graph.py` + `src/guard.py:layer2_graph_check`) is a rule-based,
+no-LLM check for that leak.
+
+Model (behind a `GraphStore` interface so Neo4j can swap in later):
+
+```
+(Document {sensitivity}) -[:MENTIONS]-> (Entity {sensitivity})
+```
+
+Distinctive secrets — `Project Atlas`, `Northwind Analytics`, `acquisition`,
+`layoffs` — are labeled `restricted`. Generic overlap vocabulary (`team changes`,
+`restructuring`, `reorganization`) is deliberately **not** sensitive: it is the
+shared wording that makes semantic search leak, but it is not itself a secret, so
+it never causes a false block.
+
+**Rule:** an allowed chunk is redacted if its document mentions an entity that is
+(a) labeled above the role's clearance **and** (b) also appears in a document the
+role cannot see — a bridge within `hop_limit` hops (`doc → entity → forbidden_doc`).
+
+```bash
+# manager can open the CONFIDENTIAL forecast, but it names "Project Atlas",
+# which bridges to the RESTRICTED M&A draft / CEO memo -> Layer 2 redacts it
+python src/pipeline.py --role manager --acl-filter --graph-check \
+  --query "What does the financial forecast say about restructuring and severance?"
+
+# exec: same entities are within clearance -> nothing redacted (no false block)
+python src/pipeline.py --role exec --acl-filter --graph-check \
+  --query "What is Project Atlas and the acquisition plan?"
+```
+
+`layer2_graph` trace span records each redaction with its bridge path:
+
+```json
+{"step": "layer2_graph", "role": "manager", "input_chunks": 3, "kept": 2,
+ "redacted": [{"doc_id": "finance_forecast_confidential", "sensitivity": "confidential",
+   "bridges": [{"entity": "Project Atlas", "target_doc": "exec_ceo_memo_restricted",
+                "target_sensitivity": "restricted", "hops": 2}]}],
+ "latency_ms": 0.4}
+```
+
 ## Layout
 
 ```
@@ -119,14 +163,16 @@ shadow-leak-guard/
 ├── data/
 │   ├── docs/     # 15 synthetic markdown documents
 │   ├── roles.json
-│   └── acl.json
+│   ├── acl.json
+│   └── entities.json  # hand-labeled entities + entity sensitivity (Layer 2)
 ├── src/
 │   ├── config.py     # paths, models, knobs
 │   ├── acl.py        # roles + ACL authorization (default deny)
 │   ├── llm.py        # Ollama embeddings + chat (temperature 0)
 │   ├── ingest.py     # chunk → embed → store with ACL metadata
 │   ├── retrieve.py   # pure top-k vector search (permission-agnostic)
-│   ├── guard.py      # Layer 1 ACL pre-filter (Layers 2/3 land in M3/M4)
+│   ├── graph.py      # GraphStore interface + NetworkX lineage graph (Layer 2)
+│   ├── guard.py      # Layer 1 ACL pre-filter + Layer 2 graph check (Layer 3 in M4)
 │   ├── pipeline.py   # ties layers together via flags
 │   └── trace.py      # JSON span logging
 ├── demo_leak.sh
