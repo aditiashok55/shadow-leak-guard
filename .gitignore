@@ -5,3 +5,4 @@ evals/last_run.log
 __pycache__/
 *.pyc
 .venv/
+.env

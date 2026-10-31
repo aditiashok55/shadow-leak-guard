@@ -214,6 +214,34 @@ python src/pipeline.py --role intern --acl-filter --graph-check --output-guard \
  "latency_ms": 820.5}
 ```
 
+## Observability — Langfuse tracing (Phase 2, U1)
+
+Every pipeline layer also emits a **Langfuse span** (`src/observability.py`) carrying
+the role, dropped/redacted chunks, each layer's decision, token counts, and latency —
+so any blocked response is fully explorable in the Langfuse trace UI, not just a local
+JSON file. The plain JSON traces (`traces/*.json`) are kept as a dependency-free
+reference.
+
+**Graceful fallback:** if Langfuse isn't installed or no keys are set, spans become
+no-ops and the pipeline runs unchanged. Nothing to configure to reproduce Phase 1.
+
+```bash
+pip install -r requirements.txt            # pulls langfuse + python-dotenv
+cp .env.example .env                       # then paste your keys
+# LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY from Langfuse Cloud or self-host:
+#   docker run -p 3000:3000 langfuse/langfuse   -> LANGFUSE_HOST=http://localhost:3000
+
+# Run any query; a trace named "rag-query" appears in Langfuse
+python src/pipeline.py --role intern --acl-filter --graph-check --output-guard \
+  --query "What's the plan for next quarter's team changes?"
+```
+
+Span map (one Langfuse span per layer): `retrieve` → `layer1_acl` → `layer2_graph`
+→ `generate` (with prompt/completion token usage) → `layer3_output`. The trace's
+final `output` + `blocked` flag records the pipeline verdict. For a screenshot, run a
+blocked intern query and open the trace — the dropped restricted docs and the block
+reason are visible on their spans.
+
 ## Layout
 
 ```
@@ -232,6 +260,7 @@ shadow-leak-guard/
 │   ├── graph.py      # GraphStore interface + NetworkX lineage graph (Layer 2)
 │   ├── guard.py      # Layer 1 ACL + Layer 2 graph check + Layer 3 output guard
 │   ├── pipeline.py   # ties layers together via flags
+│   ├── observability.py  # Langfuse spans per layer (U1; no-op fallback)
 │   └── trace.py      # JSON span logging
 ├── evals/
 │   ├── queries.json  # 27 adversarial red-team cases

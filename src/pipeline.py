@@ -25,7 +25,8 @@ from guard import (
     layer3_output_guard,
 )
 from retrieve import Chunk, retrieve
-from llm import generate
+from llm import generate_ex
+from observability import Observer
 from trace import Trace
 
 SYSTEM_PROMPT = (
@@ -63,42 +64,56 @@ def run(
     trace.span("query", role=role, query=query,
                flags={"acl_filter": acl_filter, "graph_check": graph_check,
                       "output_guard": output_guard})
+    obs = Observer(
+        name="rag-query",
+        user_role=role,
+        metadata={
+            "query": query,
+            "flags": {"acl_filter": acl_filter, "graph_check": graph_check,
+                      "output_guard": output_guard},
+        },
+    )
 
     # --- Retrieve: pure top-k vector search (permission-agnostic) ---
-    with trace.timed("retrieve") as t:
+    with trace.timed("retrieve") as t, obs.span("retrieve", role=role) as s:
         chunks = retrieve(query)
         t.set(input_role=role, input_chunks=len(chunks),
               retrieved_docs=sorted({c.doc_id for c in chunks}))
+        s.update(output={"input_chunks": len(chunks),
+                         "retrieved_docs": sorted({c.doc_id for c in chunks})})
 
     # --- Layer 1: deterministic ACL pre-filter (default deny) ---
     dropped: list[Dropped] = []
     if acl_filter:
-        with trace.timed("layer1_acl") as t:
+        with trace.timed("layer1_acl") as t, obs.span("layer1_acl", role=role) as s:
             result = layer1_acl_filter(chunks, role)
             chunks = result.kept
             dropped = result.dropped
+            dropped_meta = [{"doc_id": d.doc_id, "sensitivity": d.sensitivity,
+                             "reason": d.reason} for d in result.dropped]
             t.set(role=role, input_chunks=len(result.kept) + len(result.dropped),
-                  kept=len(result.kept),
-                  dropped=[{"doc_id": d.doc_id, "sensitivity": d.sensitivity,
-                            "reason": d.reason} for d in result.dropped])
+                  kept=len(result.kept), dropped=dropped_meta)
+            s.update(output={"kept": len(result.kept), "dropped": dropped_meta})
     else:
         trace.span("layer1_acl", enabled=False, note="baseline — no ACL enforcement")
 
     # --- Layer 2: graph lineage check (rule-based inference-leak catcher) ---
     redacted: list[Redacted] = []
     if graph_check:
-        with trace.timed("layer2_graph") as t:
+        with trace.timed("layer2_graph") as t, obs.span("layer2_graph", role=role) as s:
             result2 = layer2_graph_check(chunks, role)
             before = len(chunks)
             chunks = result2.kept
             redacted = result2.redacted
+            redacted_meta = [{"doc_id": r.doc_id, "sensitivity": r.sensitivity,
+                              "bridges": [{"entity": b.entity,
+                                           "target_doc": b.target_doc,
+                                           "target_sensitivity": b.target_sensitivity,
+                                           "hops": b.hops} for b in r.bridges]}
+                             for r in result2.redacted]
             t.set(role=role, input_chunks=before, kept=len(result2.kept),
-                  redacted=[{"doc_id": r.doc_id, "sensitivity": r.sensitivity,
-                             "bridges": [{"entity": b.entity,
-                                          "target_doc": b.target_doc,
-                                          "target_sensitivity": b.target_sensitivity,
-                                          "hops": b.hops} for b in r.bridges]}
-                            for r in result2.redacted])
+                  redacted=redacted_meta)
+            s.update(output={"kept": len(result2.kept), "redacted": redacted_meta})
     else:
         trace.span("layer2_graph", enabled=False, note="graph lineage check off")
 
@@ -106,23 +121,39 @@ def run(
         trace.span("generate", skipped=True, reason="no_chunks_allowed")
         trace.span("final", blocked=True, answer_preview="")
         trace.save()
+        obs.final("", blocked=True, blocked_by="no_chunks_allowed")
+        obs.flush()
         return PipelineResult("I don't have information to answer that.",
                               chunks, dropped, redacted, blocked=True, trace=trace)
 
-    with trace.timed("generate") as t:
-        answer = generate(SYSTEM_PROMPT, build_prompt(query, chunks))
-        t.set(context_docs=sorted({c.doc_id for c in chunks}))
+    with trace.timed("generate") as t, obs.span("generate", role=role) as s:
+        gen = generate_ex(SYSTEM_PROMPT, build_prompt(query, chunks))
+        answer = gen.text
+        t.set(context_docs=sorted({c.doc_id for c in chunks}),
+              prompt_tokens=gen.prompt_tokens,
+              completion_tokens=gen.completion_tokens,
+              total_tokens=gen.total_tokens)
+        s.update(
+            output=answer,
+            usage={"input": gen.prompt_tokens, "output": gen.completion_tokens,
+                   "total": gen.total_tokens},
+            metadata={"context_docs": sorted({c.doc_id for c in chunks})},
+        )
 
     # --- Layer 3: LLM output guard (second-line detector) ---
     guard_result = None
     if output_guard:
-        with trace.timed("layer3_output") as t:
+        with trace.timed("layer3_output") as t, obs.span("layer3_output", role=role) as s:
             guard_result = layer3_output_guard(answer, role)
             t.set(role=role, leak=guard_result.leak, reason=guard_result.reason)
+            s.update(output={"leak": guard_result.leak, "reason": guard_result.reason})
         if guard_result.leak:
             trace.span("final", blocked=True, blocked_by="layer3_output",
                        reason=guard_result.reason, answer_preview="")
             trace.save()
+            obs.final("", blocked=True, blocked_by="layer3_output",
+                      reason=guard_result.reason)
+            obs.flush()
             return PipelineResult(
                 "[BLOCKED by output guard: this answer may reveal information "
                 "your role is not cleared to see.]",
@@ -133,6 +164,8 @@ def run(
 
     trace.span("final", blocked=False, answer_preview=answer[:200])
     trace.save()
+    obs.final(answer, blocked=False)
+    obs.flush()
     return PipelineResult(answer, chunks, dropped, redacted, blocked=False,
                           guard=guard_result, trace=trace)
 
