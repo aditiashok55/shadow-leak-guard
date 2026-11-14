@@ -57,6 +57,22 @@ ANSWER:
 That's the whole project in two runs: **prove the leak, then prove the fix** — and
 `evals/run_eval.py` measures it across 27 adversarial queries (table below).
 
+## 🎮 Interactive playground (Streamlit UI)
+
+Prefer clicking over typing CLI flags? There's a local web UI to *play* with it —
+pick a role, type any question, toggle each layer, and watch every stage's decision
+(retrieved → dropped → redacted → answer → guard verdict). No keys, fully local.
+
+```bash
+pip install -r requirements.txt     # pulls streamlit
+python src/ingest.py                # build the index once (if not already)
+streamlit run ui/app.py             # opens http://localhost:8501
+```
+
+The sidebar switches role, toggles Layers 1/2/3, and flips the Layer-2 backend
+between NetworkX and Neo4j. The bottom "Browse the data" panel shows the roles,
+documents, and ACL so users understand the world they're querying.
+
 ## Status
 
 - [x] **M1 — Synthetic corpus + baseline leak demo**
@@ -371,6 +387,8 @@ shadow-leak-guard/
 │   ├── queries.json  # 27 adversarial red-team cases
 │   ├── run_eval.py   # runs all 4 configs, prints the ablation table
 │   └── results.json  # latest eval output
+├── ui/
+│   └── app.py        # Streamlit playground (role, query, layer toggles)
 ├── demo_leak.sh
 └── requirements.txt
 ```
