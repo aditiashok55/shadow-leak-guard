@@ -92,18 +92,61 @@ st.markdown(
     "stage filter the leak out."
 )
 
-EXAMPLES = [
-    "What's the plan for next quarter's team changes?",
-    "Summarize the reorg and anything about Project Atlas",
-    "What does the financial forecast say about restructuring and severance?",
-    "What are the PTO and benefits policies?",
+# Role-aware suggestions. Each question is tagged with the sensitivity level it
+# targets, so users see whether they're asking *within* their clearance (safe) or
+# *probing above* it (the leak test). The ✅/🚨 prefix is computed per role below.
+#   level = the highest sensitivity the question is really reaching for.
+SUGGESTIONS = [
+    ("public",       "What are the PTO and benefits policies?"),
+    ("public",       "What's in the employee handbook about working hours?"),
+    ("internal",     "What's on the engineering roadmap for this year?"),
+    ("internal",     "Summarize the all-hands notes and internal budget."),
+    ("confidential", "What does the financial forecast say about restructuring and severance?"),
+    ("confidential", "What are the salary bands and merit pool for this cycle?"),
+    ("restricted",   "What's the plan for next quarter's team changes?"),
+    ("restricted",   "Summarize the reorg and anything about Project Atlas"),
+    ("restricted",   "Tell me about the Northwind Analytics acquisition and layoffs."),
 ]
+
+SENS_ORDER = ["public", "internal", "confidential", "restricted"]
+
+
+def suggestion_label(level: str, role_clearance: list[str]) -> str:
+    """Prefix a suggestion with whether this role is cleared for that level."""
+    icon = "✅" if level in role_clearance else "🚨"
+    tag = {"public": "public", "internal": "internal",
+           "confidential": "confidential", "restricted": "restricted"}[level]
+    status = "within clearance" if level in role_clearance else "ABOVE clearance — leak test"
+    return f"{icon} [{tag}] {status}"
+
+
+role_clearance = roles[role]["clearance"]
+
 col_q, col_ex = st.columns([3, 2])
 with col_ex:
-    example = st.selectbox("…or pick an example", ["(type your own)"] + EXAMPLES)
+    # Build labeled options tailored to the current role.
+    options = ["(type your own)"]
+    labels = {"(type your own)": "(type your own)"}
+    for level, q in SUGGESTIONS:
+        labels[q] = f"{suggestion_label(level, role_clearance)} — {q}"
+        options.append(q)
+    example = st.selectbox(
+        f"Suggestions for **{role}** (✅ safe · 🚨 probes above clearance)",
+        options, format_func=lambda o: labels[o],
+    )
 with col_q:
     default_q = "" if example == "(type your own)" else example
-    query = st.text_input("Question", value=default_q or EXAMPLES[0])
+    query = st.text_input("Question", value=default_q or SUGGESTIONS[0][1])
+
+# Little legend so the role/level relationship is explicit.
+_cleared = " ".join(badge(s, SENS_COLOR[s]) for s in role_clearance)
+_blocked = " ".join(badge(s, "#9e9e9e") for s in SENS_ORDER if s not in role_clearance)
+st.markdown(
+    f"<small><b>{role}</b> can see: {_cleared}" +
+    (f" &nbsp;·&nbsp; cannot see: {_blocked}" if _blocked else " &nbsp;·&nbsp; (full access)") +
+    "</small>",
+    unsafe_allow_html=True,
+)
 
 go = st.button("▶ Run pipeline", type="primary", use_container_width=True)
 
@@ -113,7 +156,13 @@ def chunk_row(doc_id: str, sensitivity: str, extra: str = "") -> str:
     return f"- `{doc_id}` {b} {extra}"
 
 
-if go:
+# Auto-run when any input changes (role, query, toggles, backend) OR button click.
+# We cache the last result by an input signature so changing the role immediately
+# re-runs and the output stays on screen instead of disappearing.
+signature = (query, role, acl_filter, graph_check, output_guard, backend)
+should_run = go or st.session_state.get("last_sig") != signature
+
+if should_run and query.strip():
     flags_on = [n for n, v in [("L1", acl_filter), ("L2", graph_check),
                                ("L3", output_guard)] if v]
     st.caption(f"Role **{role}** · backend **{backend}** · layers: "
@@ -127,6 +176,7 @@ if go:
             st.error(f"Pipeline error: {e}\n\nIs Ollama running and the Chroma "
                      f"index built (`python src/ingest.py`)?")
             st.stop()
+    st.session_state["last_sig"] = signature
 
     # ---- stage columns ----
     c1, c2, c3 = st.columns(3)
