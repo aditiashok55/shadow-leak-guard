@@ -1,5 +1,6 @@
 """Shared paths and config constants for shadow-leak-guard."""
 from pathlib import Path
+import os
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
@@ -25,3 +26,9 @@ COLLECTION_NAME = "shadow_leak_docs"
 ENTITIES_PATH = DATA_DIR / "entities.json"
 ENTITY_CACHE_PATH = DATA_DIR / ".entity_cache.json"
 GRAPH_HOP_LIMIT = 2       # doc -> entity -> restricted-doc = 2 hops (one shared entity)
+
+# Graph backend (Phase 2, U2): "networkx" (default, in-memory) or "neo4j".
+GRAPH_BACKEND = os.getenv("GRAPH_BACKEND", "networkx").strip().lower()
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4jpassword")

@@ -5,3 +5,6 @@ networkx>=3.2
 # Phase 2 — U1 observability (optional; pipeline runs without these)
 langfuse>=2.0.0
 python-dotenv>=1.0.0
+
+# Phase 2 — U2 graph backend (optional; only needed for GRAPH_BACKEND=neo4j)
+neo4j>=5.0.0

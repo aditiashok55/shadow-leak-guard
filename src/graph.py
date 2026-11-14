@@ -149,12 +149,92 @@ class NetworkXGraphStore(GraphStore):
         return bridges
 
 
+class Neo4jGraphStore(GraphStore):
+    """Lineage store backed by Neo4j (Phase 2, U2).
+
+    Same graph model as NetworkXGraphStore:
+        (:Document {id, sensitivity}) -[:MENTIONS]-> (:Entity {name, sensitivity})
+
+    The lineage query is pushed into Cypher so the bridge detection runs in the
+    database. Results are identical to the in-memory backend, which is the whole
+    point: swapping backends must not change the leak rate.
+    """
+
+    def __init__(self, uri: str, user: str, password: str):
+        from neo4j import GraphDatabase  # guarded import (optional dep)
+
+        self._driver = GraphDatabase.driver(uri, auth=(user, password))
+
+    @classmethod
+    def from_config(cls) -> "Neo4jGraphStore":
+        from config import NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
+
+        return cls(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
+
+    def close(self) -> None:
+        self._driver.close()
+
+    # --- GraphStore interface ---
+    def entities_for_doc(self, doc_id: str) -> list[str]:
+        q = ("MATCH (:Document {id: $doc})-[:MENTIONS]->(e:Entity) "
+             "RETURN e.name AS name")
+        with self._driver.session() as s:
+            return [r["name"] for r in s.run(q, doc=doc_id)]
+
+    def docs_for_entity(self, entity: str) -> list[str]:
+        q = ("MATCH (d:Document)-[:MENTIONS]->(:Entity {name: $e}) "
+             "RETURN d.id AS id")
+        with self._driver.session() as s:
+            return [r["id"] for r in s.run(q, e=entity)]
+
+    def entity_sensitivity(self, entity: str) -> str:
+        q = "MATCH (e:Entity {name: $e}) RETURN e.sensitivity AS sens"
+        with self._driver.session() as s:
+            rec = s.run(q, e=entity).single()
+        return rec["sens"] if rec else "restricted"
+
+    def bridges_to_forbidden(
+        self, doc_id: str, allowed_sensitivities: list[str],
+        hop_limit: int = GRAPH_HOP_LIMIT,
+    ) -> list[Bridge]:
+        """Cypher mirror of the NetworkX logic: find entities in `doc_id` that are
+        themselves above clearance AND bridge to a document the role cannot see."""
+        if hop_limit < 2:
+            return []
+        q = (
+            "MATCH (src:Document {id: $doc})-[:MENTIONS]->(e:Entity) "
+            "WHERE NOT e.sensitivity IN $allowed "
+            "MATCH (e)<-[:MENTIONS]-(tgt:Document) "
+            "WHERE tgt.id <> $doc AND NOT tgt.sensitivity IN $allowed "
+            "RETURN DISTINCT e.name AS entity, e.sensitivity AS e_sens, "
+            "tgt.id AS target_doc, tgt.sensitivity AS t_sens"
+        )
+        with self._driver.session() as s:
+            rows = list(s.run(q, doc=doc_id, allowed=allowed_sensitivities))
+        return [
+            Bridge(entity=r["entity"], entity_sensitivity=r["e_sens"],
+                   target_doc=r["target_doc"], target_sensitivity=r["t_sens"],
+                   hops=2)
+            for r in rows
+        ]
+
+
 # Module-level singleton (cheap to build; swap for Neo4jGraphStore in Phase 2).
 _STORE: GraphStore | None = None
 
 
 def get_store() -> GraphStore:
+    """Return the configured lineage backend.
+
+    GRAPH_BACKEND=networkx (default) builds the in-memory graph from entities.json.
+    GRAPH_BACKEND=neo4j connects to Neo4j (must be loaded first via load_neo4j.py).
+    """
     global _STORE
     if _STORE is None:
-        _STORE = NetworkXGraphStore.from_file()
+        from config import GRAPH_BACKEND
+
+        if GRAPH_BACKEND == "neo4j":
+            _STORE = Neo4jGraphStore.from_config()
+        else:
+            _STORE = NetworkXGraphStore.from_file()
     return _STORE

@@ -242,6 +242,42 @@ final `output` + `blocked` flag records the pipeline verdict. For a screenshot, 
 blocked intern query and open the trace — the dropped restricted docs and the block
 reason are visible on their spans.
 
+## Graph backend — Neo4j (Phase 2, U2)
+
+Layer 2's lineage store sits behind a backend-agnostic `GraphStore` interface
+(`src/graph.py`). Phase 1 uses an in-memory NetworkX graph; Phase 2 adds a drop-in
+`Neo4jGraphStore` that pushes the bridge-detection query into Cypher. **Switching
+backends must not change the leak rate** — and it doesn't.
+
+```bash
+# 1. start Neo4j
+docker run -d --name slg-neo4j -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/neo4jpassword neo4j:5
+
+# 2. load the same entities.json graph into Neo4j (idempotent)
+python src/load_neo4j.py          # -> 16 documents, 32 entities, 63 MENTIONS edges
+
+# 3. run anything with the neo4j backend
+GRAPH_BACKEND=neo4j python src/pipeline.py --role intern \
+  --acl-filter --graph-check --output-guard --query "..."
+GRAPH_BACKEND=neo4j python evals/run_eval.py
+```
+
+Both backends produce the **identical** ablation curve, proving the swap is
+behavior-preserving:
+
+| Config        | NetworkX leak | Neo4j leak | False-block |
+|---------------|---------------|------------|-------------|
+| Baseline      | 37.0%         | 37.0%      | 0.0%        |
+| + Layer 1     | 3.7%          | 3.7%       | 12.5%       |
+| + Layer 1+2   | 0.0%          | 0.0%       | 18.8%       |
+| + Layer 1+2+3 | 0.0%          | 0.0%       | 18.8%       |
+
+Model: `(:Document {id, sensitivity})-[:MENTIONS]->(:Entity {name, sensitivity})`.
+The Cypher bridge query mirrors the NetworkX logic — an entity bridges to forbidden
+content when it is itself above the role's clearance **and** also appears in a
+document the role cannot see.
+
 ## Layout
 
 ```
@@ -257,10 +293,11 @@ shadow-leak-guard/
 │   ├── llm.py        # Ollama embeddings + chat (temperature 0)
 │   ├── ingest.py     # chunk → embed → store with ACL metadata
 │   ├── retrieve.py   # pure top-k vector search (permission-agnostic)
-│   ├── graph.py      # GraphStore interface + NetworkX lineage graph (Layer 2)
+│   ├── graph.py      # GraphStore ABC + NetworkX & Neo4j lineage backends (Layer 2)
 │   ├── guard.py      # Layer 1 ACL + Layer 2 graph check + Layer 3 output guard
 │   ├── pipeline.py   # ties layers together via flags
 │   ├── observability.py  # Langfuse spans per layer (U1; no-op fallback)
+│   ├── load_neo4j.py # loads entities.json into Neo4j (U2)
 │   └── trace.py      # JSON span logging
 ├── evals/
 │   ├── queries.json  # 27 adversarial red-team cases
