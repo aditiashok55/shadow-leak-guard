@@ -12,3 +12,16 @@ Milestone-by-milestone proof, each reproducible with one command.
 
 See also the write-up in [`../article/`](../article/) and live diagrams in
 [`../article/diagrams.md`](../article/diagrams.md).
+
+## Phase 2 — production upgrades
+
+| Upgrade | What | Status |
+|---|---|---|
+| U1 | **Langfuse tracing** — one span per layer (role, dropped chunks, tokens, latency); graceful no-op without keys | ✅ done |
+| U2 | **Neo4j graph backend** — `Neo4jGraphStore` behind the same `GraphStore` interface; identical leak curve on both backends | ✅ done |
+| U4 | **CI evals** — GitHub Action runs `run_eval.py`, fails on leak-rate regression | ⬜ planned |
+
+Both U1 and U2 are **optional at runtime**: with no keys and the default
+`GRAPH_BACKEND=networkx`, the pipeline runs exactly as in Phase 1. See the main
+[`../README.md`](../README.md) "Observability" and "Graph backend — Neo4j" sections
+for setup and example outputs.
