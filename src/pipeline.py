@@ -45,6 +45,32 @@ class PipelineResult:
     blocked: bool = False
     guard: Layer3Result | None = None
     trace: Trace = None  # type: ignore[assignment]
+    role: str = ""
+
+    @property
+    def access_note(self) -> str:
+        """Human-readable reason when the defense layers withheld content.
+
+        Returned as a separate note (not baked into the answer) so a vague
+        "I don't know" is explained: the role lacked clearance, or the content
+        bridged to material above its clearance. Empty string when nothing was
+        withheld.
+        """
+        reasons: list[str] = []
+        if self.dropped:
+            levels = sorted({d.sensitivity for d in self.dropped})
+            reasons.append(
+                f"{len(self.dropped)} source(s) were blocked by the ACL filter "
+                f"because your role (**{self.role or 'this role'}**) is not cleared "
+                f"for: {', '.join(levels)}."
+            )
+        if self.redacted:
+            reasons.append(
+                f"{len(self.redacted)} source(s) were redacted by the graph check "
+                f"because they reference information that bridges to documents above "
+                f"your clearance (inference-leak protection)."
+            )
+        return " ".join(reasons)
 
 
 def build_prompt(query: str, chunks: list[Chunk]) -> str:
@@ -124,7 +150,8 @@ def run(
         obs.final("", blocked=True, blocked_by="no_chunks_allowed")
         obs.flush()
         return PipelineResult("I don't have information to answer that.",
-                              chunks, dropped, redacted, blocked=True, trace=trace)
+                              chunks, dropped, redacted, blocked=True, trace=trace,
+                              role=role)
 
     with trace.timed("generate") as t, obs.span("generate", role=role) as s:
         gen = generate_ex(SYSTEM_PROMPT, build_prompt(query, chunks))
@@ -158,7 +185,7 @@ def run(
                 "[BLOCKED by output guard: this answer may reveal information "
                 "your role is not cleared to see.]",
                 chunks, dropped, redacted, blocked=True,
-                guard=guard_result, trace=trace)
+                guard=guard_result, trace=trace, role=role)
     else:
         trace.span("layer3_output", enabled=False, note="output guard off")
 
@@ -167,7 +194,7 @@ def run(
     obs.final(answer, blocked=False)
     obs.flush()
     return PipelineResult(answer, chunks, dropped, redacted, blocked=False,
-                          guard=guard_result, trace=trace)
+                          guard=guard_result, trace=trace, role=role)
 
 
 def main() -> None:
@@ -206,6 +233,10 @@ def main() -> None:
         print(f"\nLAYER 3 verdict: {verdict} — {result.guard.reason}")
     print("\nANSWER:\n")
     print(result.answer)
+    note = result.access_note
+    if note:
+        # Strip markdown bold for the plain-text terminal.
+        print("\nWHY: " + note.replace("**", ""))
     if result.blocked:
         print("\n[BLOCKED for this role]")
     print("\n" + "=" * 70)

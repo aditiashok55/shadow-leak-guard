@@ -252,6 +252,9 @@ if should_run and query.strip():
 
     st.subheader("Final answer")
     st.markdown(f"> {result.answer}")
+    note = result.access_note
+    if note:
+        st.info("🔒 **Why this answer is limited:** " + note)
 
     # ---- raw trace ----
     with st.expander("🔍 Raw trace spans (per step)"):
