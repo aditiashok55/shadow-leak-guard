@@ -113,7 +113,11 @@ def _generate_groq(system: str, prompt: str) -> Generation:
         )
     resp = requests.post(
         f"{GROQ_BASE_URL}/chat/completions",
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+        headers={
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "User-Agent": "shadow-leak-guard/1.0",
+            "Content-Type": "application/json",
+        },
         json={
             "model": GROQ_MODEL,
             "messages": [
