@@ -73,6 +73,45 @@ The sidebar switches role, toggles Layers 1/2/3, and flips the Layer-2 backend
 between NetworkX and Neo4j. The bottom "Browse the data" panel shows the roles,
 documents, and ACL so users understand the world they're querying.
 
+## 🌐 Deploy as a public website
+
+The app is provider-pluggable, so the **same code** runs two ways:
+
+| | Local dev | Public deploy |
+|---|---|---|
+| **LLM** | Ollama (`llama3.1`, on your machine) | Groq hosted API (`openai/gpt-oss-20b`) |
+| **Embeddings** | Ollama (`nomic-embed-text`) | `sentence-transformers` (CPU, free, in-process) |
+| **Layer 2 graph** | NetworkX or Neo4j | NetworkX (in-memory, no server) |
+| Selected by | defaults | `LLM_PROVIDER` / `EMBED_PROVIDER` secrets |
+
+**Why a hosted LLM?** Free hosts (Streamlit Cloud, HF Spaces) have no GPU, so they
+can't run Ollama. Groq runs the model on its own GPUs and the app calls it over
+HTTPS. Embeddings stay in-process via a small CPU model, so no embedding API is
+needed. (⚠️ **Netlify / Vercel can't host this** — they don't run a long-lived
+Python server. Use Streamlit Cloud or Hugging Face Spaces.)
+
+**Deploy to Streamlit Community Cloud (free):**
+1. Push this repo to GitHub (done).
+2. At [share.streamlit.io](https://share.streamlit.io) → *New app* → pick this
+   repo, set the main file to `ui/app.py`.
+3. In the app's **Settings → Secrets**, paste (your own rotated key):
+   ```toml
+   LLM_PROVIDER = "groq"
+   GROQ_API_KEY = "gsk_your_rotated_key"
+   GROQ_MODEL = "openai/gpt-oss-20b"
+   EMBED_PROVIDER = "sentence-transformers"
+   GRAPH_BACKEND = "networkx"
+   ```
+4. Deploy. On first boot the app **self-builds** the vector index from `data/docs/`
+   (no prebuilt `.chroma` needed), then serves.
+
+**Test the cloud path locally first:** copy `.streamlit/secrets.toml.example` to
+`.streamlit/secrets.toml`, add your key, then `streamlit run ui/app.py`. The app
+will use Groq + CPU embeddings exactly as the deployed site does.
+
+> 🔐 **Never commit keys.** `.streamlit/secrets.toml` and `.env` are gitignored.
+> If a key ever lands in a terminal or a commit, rotate it immediately.
+
 ## Status
 
 - [x] **M1 — Synthetic corpus + baseline leak demo**

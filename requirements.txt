@@ -11,3 +11,6 @@ neo4j>=5.0.0
 
 # Interactive playground UI (optional; `streamlit run ui/app.py`)
 streamlit>=1.30.0
+
+# Cloud deploy: CPU embeddings (no Ollama needed on the host)
+sentence-transformers>=2.2.0

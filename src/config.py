@@ -10,10 +10,44 @@ ACL_PATH = DATA_DIR / "acl.json"
 TRACES_DIR = ROOT / "traces"
 CHROMA_DIR = ROOT / ".chroma"
 
-# Ollama models (local, deterministic)
+
+def _secret(name: str, default: str = "") -> str:
+    """Read a setting from env first, then Streamlit secrets (if available).
+
+    This lets the same code run locally (env / .env) and on Streamlit Cloud
+    (st.secrets) without changes. Never hard-code keys.
+    """
+    val = os.getenv(name)
+    if val:
+        return val
+    try:  # Streamlit may not be installed in CLI-only contexts.
+        import streamlit as st  # type: ignore
+
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return default
+
+
+# --- LLM provider (local Ollama for dev, Groq for cloud deploy) ---------------
+# LLM_PROVIDER = "ollama" (default, local) | "groq" (hosted, OpenAI-compatible)
+LLM_PROVIDER = _secret("LLM_PROVIDER", "ollama").strip().lower()
+
+# Ollama (local) models + host
 EMBED_MODEL = "nomic-embed-text"
 LLM_MODEL = "llama3.1:latest"
-OLLAMA_HOST = "http://localhost:11434"
+OLLAMA_HOST = _secret("OLLAMA_HOST", "http://localhost:11434")
+
+# Groq (cloud) — OpenAI-compatible chat API. Key comes from env / st.secrets.
+GROQ_API_KEY = _secret("GROQ_API_KEY", "")
+GROQ_MODEL = _secret("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_BASE_URL = _secret("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+
+# --- Embedding provider -------------------------------------------------------
+# EMBED_PROVIDER = "ollama" (default, local) | "sentence-transformers" (CPU, cloud)
+EMBED_PROVIDER = _secret("EMBED_PROVIDER", "ollama").strip().lower()
+ST_EMBED_MODEL = _secret("ST_EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
 # Retrieval / generation knobs
 TOP_K = 5

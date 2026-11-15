@@ -10,8 +10,21 @@ from __future__ import annotations
 import chromadb
 
 from acl import doc_allowed_roles, doc_sensitivity
-from config import CHROMA_DIR, CHUNK_OVERLAP, CHUNK_SIZE, COLLECTION_NAME, DOCS_DIR
+from config import (
+    CHROMA_DIR,
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    COLLECTION_NAME,
+    DOCS_DIR,
+    EMBED_PROVIDER,
+)
 from llm import embed_many
+
+
+def _collection_name() -> str:
+    """Isolate collections per embedding provider (vector dims differ)."""
+    suffix = "st" if EMBED_PROVIDER == "sentence-transformers" else "ollama"
+    return f"{COLLECTION_NAME}_{suffix}"
 
 
 def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
@@ -27,13 +40,14 @@ def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) 
 
 def get_collection(reset: bool = False):
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+    name = _collection_name()
     if reset:
         try:
-            client.delete_collection(COLLECTION_NAME)
+            client.delete_collection(name)
         except Exception:
             pass
     return client.get_or_create_collection(
-        name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
+        name=name, metadata={"hnsw:space": "cosine"}
     )
 
 
@@ -64,8 +78,19 @@ def ingest() -> int:
     print(f"Embedding {len(documents)} chunks from {DOCS_DIR} ...")
     embeddings = embed_many(documents)
     collection.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
-    print(f"Ingested {len(documents)} chunks into collection '{COLLECTION_NAME}'.")
+    print(f"Ingested {len(documents)} chunks into collection '{_collection_name()}'.")
     return len(documents)
+
+
+def ensure_ingested() -> int:
+    """Build the index on first use if it's empty (used by the cloud UI).
+
+    Lets a fresh deploy self-bootstrap: no prebuilt .chroma needed in the repo.
+    """
+    collection = get_collection(reset=False)
+    if collection.count() == 0:
+        return ingest()
+    return collection.count()
 
 
 if __name__ == "__main__":

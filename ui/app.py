@@ -28,9 +28,24 @@ if str(SRC) not in sys.path:
 
 from config import ACL_PATH, ROLES_PATH  # noqa: E402
 import graph as graph_mod  # noqa: E402
+from ingest import ensure_ingested  # noqa: E402
 from pipeline import run  # noqa: E402
 
 st.set_page_config(page_title="shadow-leak-guard", page_icon="🛡️", layout="wide")
+
+
+@st.cache_resource
+def _bootstrap_index() -> int:
+    """Build the Chroma index on first boot if empty (fresh cloud deploy)."""
+    return ensure_ingested()
+
+
+# Self-bootstrap so a fresh deploy needs no prebuilt index checked in.
+try:
+    _bootstrap_index()
+except Exception as _e:  # pragma: no cover
+    st.warning(f"Index bootstrap deferred: {_e}")
+
 
 SENS_COLOR = {
     "public": "#2e7d32",       # green
