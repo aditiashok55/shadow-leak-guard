@@ -41,7 +41,7 @@ OLLAMA_HOST = _secret("OLLAMA_HOST", "http://localhost:11434")
 
 # Groq (cloud) — OpenAI-compatible chat API. Key comes from env / st.secrets.
 GROQ_API_KEY = _secret("GROQ_API_KEY", "")
-GROQ_MODEL = _secret("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_MODEL = _secret("GROQ_MODEL", "llama2-70b-4096")
 GROQ_BASE_URL = _secret("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
 # --- Embedding provider -------------------------------------------------------
