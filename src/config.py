@@ -40,8 +40,14 @@ LLM_MODEL = "llama3.1:latest"
 OLLAMA_HOST = _secret("OLLAMA_HOST", "http://localhost:11434")
 
 # Groq (cloud) — OpenAI-compatible chat API. Key comes from env / st.secrets.
+# NOTE: must be a *chat/generation* model. Do NOT use classifier/guard models
+# like "meta-llama/llama-prompt-guard-*" or "*-safeguard-*", nor audio models
+# like "whisper-*" / "orpheus-*" — they don't generate answers, so the pipeline
+# will appear to hang.
+# Good options: "openai/gpt-oss-120b" (best), "openai/gpt-oss-20b" (verified),
+# "qwen/qwen3.8-27b".
 GROQ_API_KEY = _secret("GROQ_API_KEY", "")
-GROQ_MODEL = _secret("GROQ_MODEL", "llama2-70b-4096")
+GROQ_MODEL = _secret("GROQ_MODEL", "openai/gpt-oss-20b")
 GROQ_BASE_URL = _secret("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
 # --- Embedding provider -------------------------------------------------------

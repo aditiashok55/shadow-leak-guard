@@ -46,8 +46,11 @@ def get_collection(reset: bool = False):
             client.delete_collection(name)
         except Exception:
             pass
+    # embedding_function=None: we ALWAYS supply our own vectors (add/query use
+    # embeddings=/query_embeddings=). This stops Chroma from lazily fetching its
+    # default ONNX MiniLM model from the network, which otherwise stalls startup.
     return client.get_or_create_collection(
-        name=name, metadata={"hnsw:space": "cosine"}
+        name=name, metadata={"hnsw:space": "cosine"}, embedding_function=None
     )
 
 
