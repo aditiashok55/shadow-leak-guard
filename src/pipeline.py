@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 
+from config import TOP_K
 from guard import (
     Dropped,
     Layer3Result,
@@ -101,8 +102,14 @@ def run(
     )
 
     # --- Retrieve: pure top-k vector search (permission-agnostic) ---
+    # When a filter layer is active we over-retrieve a larger candidate pool so
+    # that lower-ranked but *allowed* chunks survive the filter. Otherwise a
+    # sensitive query whose top-k are all restricted would leave nothing to
+    # answer from (a misleading "I don't know"). We trim back to TOP_K after
+    # filtering, below. Baseline (no filter) keeps the exact top-k to still leak.
+    pool = max(TOP_K * 6, 24) if (acl_filter or graph_check) else TOP_K
     with trace.timed("retrieve") as t, obs.span("retrieve", role=role) as s:
-        chunks = retrieve(query)
+        chunks = retrieve(query, top_k=pool)
         t.set(input_role=role, input_chunks=len(chunks),
               retrieved_docs=sorted({c.doc_id for c in chunks}))
         s.update(output={"input_chunks": len(chunks),
@@ -142,6 +149,12 @@ def run(
             s.update(output={"kept": len(result2.kept), "redacted": redacted_meta})
     else:
         trace.span("layer2_graph", enabled=False, note="graph lineage check off")
+
+    # Chunks are distance-sorted from retrieval; after filtering, keep only the
+    # best TOP_K *allowed* ones so the prompt stays focused (we over-retrieved
+    # above only to let allowed chunks survive the filter).
+    if (acl_filter or graph_check) and len(chunks) > TOP_K:
+        chunks = sorted(chunks, key=lambda c: c.distance)[:TOP_K]
 
     if not chunks:
         trace.span("generate", skipped=True, reason="no_chunks_allowed")
