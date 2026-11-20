@@ -252,7 +252,10 @@ if should_run and query.strip():
 
     st.subheader("Final answer")
     st.markdown(f"> {result.answer}")
+    scope = result.scope_message
     note = result.access_note
+    if scope:
+        st.warning(scope)
     if note:
         st.info("🔒 **Why this answer is limited:** " + note)
 

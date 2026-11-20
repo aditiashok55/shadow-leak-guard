@@ -73,6 +73,40 @@ class PipelineResult:
             )
         return " ".join(reasons)
 
+    @property
+    def withheld(self) -> bool:
+        """True if any source was dropped (Layer 1) or redacted (Layer 2)."""
+        return bool(self.dropped or self.redacted)
+
+    def _answer_is_unhelpful(self) -> bool:
+        """Heuristic: did the model effectively say 'I don't know'?"""
+        a = (self.answer or "").lower()
+        needles = (
+            "i don't know", "i do not know", "dont know", "don't know",
+            "no information", "not have information", "don't have information",
+            "do not have information", "cannot answer", "can't answer",
+            "cannot find", "can't find", "not able to answer", "no relevant",
+            "insufficient information", "not enough information",
+        )
+        return any(n in a for n in needles)
+
+    @property
+    def scope_message(self) -> str:
+        """Friendly, access-scoped message when clearance limited the answer.
+
+        Shown when the request was fully blocked, or when the model gave an
+        unhelpful answer *and* we actually withheld sensitive sources — i.e. the
+        gap is due to access scope, not a missing document. Empty otherwise.
+        """
+        if self.blocked or (self.withheld and self._answer_is_unhelpful()):
+            who = self.role or "your role"
+            return (
+                f"🔒 This is outside your access scope. **{who.capitalize()}** "
+                "isn't cleared to view the documents needed to answer this, so "
+                "those details have been kept private."
+            )
+        return ""
+
 
 def build_prompt(query: str, chunks: list[Chunk]) -> str:
     context = "\n\n".join(f"[{c.doc_id}] {c.text}" for c in chunks)
@@ -162,9 +196,9 @@ def run(
         trace.save()
         obs.final("", blocked=True, blocked_by="no_chunks_allowed")
         obs.flush()
-        return PipelineResult("I don't have information to answer that.",
-                              chunks, dropped, redacted, blocked=True, trace=trace,
-                              role=role)
+        return PipelineResult(
+            "I can't share details on this — it's restricted to your access scope.",
+            chunks, dropped, redacted, blocked=True, trace=trace, role=role)
 
     with trace.timed("generate") as t, obs.span("generate", role=role) as s:
         gen = generate_ex(SYSTEM_PROMPT, build_prompt(query, chunks))
@@ -246,6 +280,9 @@ def main() -> None:
         print(f"\nLAYER 3 verdict: {verdict} — {result.guard.reason}")
     print("\nANSWER:\n")
     print(result.answer)
+    scope = result.scope_message
+    if scope:
+        print("\n" + scope.replace("**", ""))
     note = result.access_note
     if note:
         # Strip markdown bold for the plain-text terminal.
